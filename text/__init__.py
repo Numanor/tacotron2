@@ -1,18 +1,27 @@
 """ from https://github.com/keithito/tacotron """
 import re
-from text import cleaners
-from text.symbols import symbols
+from . import cleaners
+from .symbols import symbols
+from .pinyin import pinyin_to_symbols
 
 
 # Mappings from symbol to numeric ID and vice versa:
-_symbol_to_id = {s: i for i, s in enumerate(symbols)}
-_id_to_symbol = {i: s for i, s in enumerate(symbols)}
+_cur_lang = None
+_symbol_to_id = None
+_id_to_symbol = None
+
+def _change_lang(lang):
+  global _cur_lang, _symbol_to_id, _id_to_symbol
+  if _cur_lang != lang:
+    _symbol_to_id = {s: i for i, s in enumerate(symbols(lang))}
+    _id_to_symbol = {i: s for i, s in enumerate(symbols(lang))}
+    _cur_lang = lang
 
 # Regular expression matching text enclosed in curly braces:
 _curly_re = re.compile(r'(.*?)\{(.+?)\}(.*)')
 
 
-def text_to_sequence(text, cleaner_names):
+def text_to_sequence(text, cleaner_names, lang):
   '''Converts a string of text to a sequence of IDs corresponding to the symbols in the text.
 
     The text can optionally have ARPAbet sequences enclosed in curly braces embedded
@@ -25,25 +34,34 @@ def text_to_sequence(text, cleaner_names):
     Returns:
       List of integers corresponding to the symbols in the text
   '''
+  _change_lang(lang)
+
   sequence = []
 
-  # Check for curly braces and treat their contents as ARPAbet:
-  while len(text):
-    m = _curly_re.match(text)
-    if not m:
-      sequence += _symbols_to_sequence(_clean_text(text, cleaner_names))
-      break
-    sequence += _symbols_to_sequence(_clean_text(m.group(1), cleaner_names))
-    sequence += _arpabet_to_sequence(m.group(2))
-    text = m.group(3)
+  # Chinese Pinyin symbols (initial, final, tone, etc)
+  if lang == 'py':
+    sequence += _symbols_to_sequence(pinyin_to_symbols(text))
+
+  # other symbols (English characters)
+  else:
+    # Check for curly braces and treat their contents as ARPAbet:
+    while len(text):
+      m = _curly_re.match(text)
+      if not m:
+        sequence += _symbols_to_sequence(_clean_text(text, cleaner_names))
+        break
+      sequence += _symbols_to_sequence(_clean_text(m.group(1), cleaner_names))
+      sequence += _arpabet_to_sequence(m.group(2))
+      text = m.group(3)
 
   # Append EOS token
   sequence.append(_symbol_to_id['~'])
   return sequence
 
 
-def sequence_to_text(sequence):
+def sequence_to_text(sequence, lang):
   '''Converts a sequence of IDs back to a string'''
+  _change_lang(lang)
   result = ''
   for symbol_id in sequence:
     if symbol_id in _id_to_symbol:

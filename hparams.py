@@ -25,6 +25,7 @@ class Hparams:
         self.training_files = "filelists/ljs_audio_text_train_filelist.txt"
         self.validation_files = "filelists/ljs_audio_text_val_filelist.txt"
         self.text_cleaners = ["english_cleaners"]
+        self.symbols_lang = "en"  # en: English characters; py: Chinese Pinyin symbols
 
         ################################
         # Audio Parameters             #
@@ -41,7 +42,7 @@ class Hparams:
         ################################
         # Model Parameters             #
         ################################
-        self.n_symbols = len(symbols)
+        self.n_symbols = len(symbols(self.symbols_lang))
         self.symbols_embedding_dim = 512
 
         # Encoder parameters
