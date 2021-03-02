@@ -19,25 +19,18 @@ class Hparams:
         self.ignore_layers = ["embedding.weight"]
 
         ################################
-        # Data Parameters             #
+        # Data Parameters              #
         ################################
         self.load_mel_from_disk = False
-        self.training_files = "filelists/ljs_audio_text_train_filelist.txt"
-        self.validation_files = "filelists/ljs_audio_text_val_filelist.txt"
-        self.text_cleaners = ["english_cleaners"]
+        self.training_files = "DATASET/train.csv.txt"
+        self.validation_files = "DATASET/val.csv.txt"
+        self.text_cleaners = ["basic_cleaners"]
         self.symbols_lang = "en"  # en: English characters; py: Chinese Pinyin symbols
 
         ################################
         # Audio Parameters             #
         ################################
-        self.max_wav_value = 32768.0
-        self.sampling_rate = 22050
-        self.filter_length = 1024
-        self.hop_length = 256
-        self.win_length = 1024
         self.n_mel_channels = 80
-        self.mel_fmin = 0.0
-        self.mel_fmax = 8000.0
 
         ################################
         # Model Parameters             #
@@ -76,7 +69,7 @@ class Hparams:
         # Optimization Hyperparameters #
         ################################
         self.use_saved_learning_rate = False
-        self.learning_rate = 1e-5
+        self.learning_rate = 1e-3
         self.weight_decay = 1e-6
         self.grad_clip_thresh = 1.0
         self.batch_size = 32

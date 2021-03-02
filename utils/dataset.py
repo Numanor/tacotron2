@@ -1,56 +1,47 @@
+import os
 import random
 import numpy as np
 import torch
-import torch.utils.data
 
-from model import layers
-from .utils import load_wav_to_torch, load_filepaths_and_text
 from text import text_to_sequence
 
 
-class TextMelLoader(torch.utils.data.Dataset):
+class TextMelDataset(torch.utils.data.Dataset):
     """
-        1) loads audio,text pairs
+        1) loads filepath,text pairs
         2) normalizes text and converts them to sequences of one-hot vectors
-        3) computes mel-spectrograms from audio files.
+        3) loads mel-spectrograms from mel files
     """
-    def __init__(self, audiopaths_and_text, hparams):
-        self.audiopaths_and_text = load_filepaths_and_text(audiopaths_and_text)
-        self.text_cleaners = hparams.text_cleaners
-        self.symbols_lang  = hparams.symbols_lang
-        self.max_wav_value = hparams.max_wav_value
-        self.sampling_rate = hparams.sampling_rate
-        self.load_mel_from_disk = hparams.load_mel_from_disk
-        self.stft = layers.TacotronSTFT(
-            hparams.filter_length, hparams.hop_length, hparams.win_length,
-            hparams.n_mel_channels, hparams.sampling_rate, hparams.mel_fmin,
-            hparams.mel_fmax)
+    def __init__(self, fname, hparams):
+        self.text_cleaners  = hparams.text_cleaners
+        self.symbols_lang   = hparams.symbols_lang
+        self.n_mel_channels = hparams.n_mel_channels
+        self.f_list = self.files_to_list(fname)
         random.seed(hparams.seed)
-        random.shuffle(self.audiopaths_and_text)
+        random.shuffle(self.f_list)
 
-    def get_mel_text_pair(self, audiopath_and_text):
-        # separate filename and text
-        audiopath, text = audiopath_and_text[0], audiopath_and_text[1]
+    def files_to_list(self, file_path):
+        f_list = []
+        with open(file_path, encoding = 'utf-8') as f:
+            for line in f:
+                parts = line.strip().strip('\ufeff').split('|') #remove BOM
+                path  = parts[0]
+                text  = parts[1]
+                f_list.append([text, path])
+        return f_list
+
+    def get_mel_text_pair(self, text, file_path):
         text = self.get_text(text)
-        mel = self.get_mel(audiopath)
+        mel = self.get_mel(file_path)
         return (text, mel)
 
-    def get_mel(self, filename):
-        if not self.load_mel_from_disk:
-            audio, sampling_rate = load_wav_to_torch(filename)
-            if sampling_rate != self.stft.sampling_rate:
-                raise ValueError("{} {} SR doesn't match target {} SR".format(
-                    sampling_rate, self.stft.sampling_rate))
-            audio_norm = audio / self.max_wav_value
-            audio_norm = audio_norm.unsqueeze(0)
-            audio_norm = torch.autograd.Variable(audio_norm, requires_grad=False)
-            melspec = self.stft.mel_spectrogram(audio_norm)
-            melspec = torch.squeeze(melspec, 0)
-        else:
-            melspec = torch.from_numpy(np.load(filename))
-            assert melspec.size(0) == self.stft.n_mel_channels, (
-                'Mel dimension mismatch: given {}, expected {}'.format(
-                    melspec.size(0), self.stft.n_mel_channels))
+    def get_mel(self, file_path):
+        #stored melspec: np.ndarray [shape=(T_out, num_mels)]
+        #in Pytorch [shape=(num_mels, T_out)]
+        mel = np.load(file_path)
+        melspec = torch.from_numpy(np.load(file_path).T)
+        assert melspec.size(0) == self.n_mel_channels, (
+            'Mel dimension mismatch: given {}, expected {}'.format(melspec.size(0), self.n_mel_channels))
 
         return melspec
 
@@ -59,14 +50,14 @@ class TextMelLoader(torch.utils.data.Dataset):
         return text_norm
 
     def __getitem__(self, index):
-        return self.get_mel_text_pair(self.audiopaths_and_text[index])
+        return self.get_mel_text_pair(*self.f_list[index])
 
     def __len__(self):
-        return len(self.audiopaths_and_text)
+        return len(self.f_list)
 
 
 class TextMelCollate():
-    """ Zero-pads model inputs and targets based on number of frames per setep
+    """ Zero-pads model inputs and targets based on number of frames per step
     """
     def __init__(self, n_frames_per_step):
         self.n_frames_per_step = n_frames_per_step
@@ -108,5 +99,4 @@ class TextMelCollate():
             gate_padded[i, mel.size(1)-1:] = 1
             output_lengths[i] = mel.size(1)
 
-        return text_padded, input_lengths, mel_padded, gate_padded, \
-            output_lengths
+        return text_padded, input_lengths, mel_padded, gate_padded, output_lengths
