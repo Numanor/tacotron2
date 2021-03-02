@@ -25,7 +25,9 @@ class TextMelDataset(torch.utils.data.Dataset):
         with open(file_path, encoding = 'utf-8') as f:
             for line in f:
                 parts = line.strip().strip('\ufeff').split('|') #remove BOM
+                # mel_file_path
                 path  = parts[0]
+                # text
                 text  = parts[1]
                 f_list.append([text, path])
         return f_list
