@@ -10,9 +10,8 @@ import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
-from model.model import Tacotron2
+from model.tacotron import Tacotron2, Tacotron2Loss
 from utils.dataset import TextMelDataset, TextMelCollate
-from model.loss import Tacotron2Loss
 from utils.logger import Tacotron2Logger
 from hparams import create_hparams
 

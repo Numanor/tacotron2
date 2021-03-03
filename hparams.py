@@ -21,7 +21,6 @@ class Hparams:
         ################################
         # Data Parameters              #
         ################################
-        self.load_mel_from_disk = False
         self.training_files = "DATASET/train.csv.txt"
         self.validation_files = "DATASET/val.csv.txt"
         self.text_cleaners = ["basic_cleaners"]
