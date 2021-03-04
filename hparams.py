@@ -64,6 +64,14 @@ class Hparams:
         self.postnet_kernel_size = 5
         self.postnet_n_convolutions = 5
 
+        # Speaker adversarial classifier parameters
+        self.speaker_hidden_dim = 256
+        self.speaker_loss_weight = 0.02
+
+        # Speaker embedding
+        self.speaker_embedding_dim = 64
+        self.n_speakers = 11
+
         ################################
         # Optimization Hyperparameters #
         ################################

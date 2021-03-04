@@ -2,7 +2,7 @@ import torch
 from torch.autograd import Variable
 from torch import nn
 from torch.nn import functional as F
-from .layers import ConvNorm, LinearNorm
+from .layers import ConvNorm, LinearNorm, GradientReversal
 from utils.utils import to_gpu, get_mask_from_lengths
 
 
@@ -219,7 +219,7 @@ class Decoder(nn.Module):
             [hparams.prenet_dim, hparams.prenet_dim])
 
         self.attention_rnn = nn.LSTMCell(
-            hparams.prenet_dim + hparams.encoder_embedding_dim,
+            hparams.prenet_dim + hparams.encoder_embedding_dim + hparams.speaker_embedding_dim,
             hparams.attention_rnn_dim)
 
         self.attention_layer = Attention(
@@ -337,7 +337,7 @@ class Decoder(nn.Module):
 
         return mel_outputs, gate_outputs, alignments
 
-    def decode(self, decoder_input):
+    def decode(self, decoder_input, speaker_embedding):
         """ Decoder step using stored states, attention and memory
         PARAMS
         ------
@@ -349,7 +349,7 @@ class Decoder(nn.Module):
         gate_output: gate output energies
         attention_weights:
         """
-        cell_input = torch.cat((decoder_input, self.attention_context), -1)
+        cell_input = torch.cat((decoder_input, self.attention_context, speaker_embedding), -1)
         self.attention_hidden, self.attention_cell = self.attention_rnn(
             cell_input, (self.attention_hidden, self.attention_cell))
         self.attention_hidden = F.dropout(
@@ -378,7 +378,7 @@ class Decoder(nn.Module):
         gate_prediction = self.gate_layer(decoder_hidden_attention_context)
         return decoder_output, gate_prediction, self.attention_weights
 
-    def forward(self, memory, decoder_inputs, memory_lengths):
+    def forward(self, memory, speaker_embedding, decoder_inputs, memory_lengths):
         """ Decoder forward pass for training
         PARAMS
         ------
@@ -405,7 +405,7 @@ class Decoder(nn.Module):
         while len(mel_outputs) < decoder_inputs.size(0) - 1:
             decoder_input = decoder_inputs[len(mel_outputs)]
             mel_output, gate_output, attention_weights = self.decode(
-                decoder_input)
+                decoder_input, speaker_embedding)
             mel_outputs += [mel_output.squeeze(1)]
             gate_outputs += [gate_output.squeeze(1)]
             alignments += [attention_weights]
@@ -415,7 +415,7 @@ class Decoder(nn.Module):
 
         return mel_outputs, gate_outputs, alignments
 
-    def inference(self, memory):
+    def inference(self, memory, speaker_embedding):
         """ Decoder inference
         PARAMS
         ------
@@ -434,7 +434,7 @@ class Decoder(nn.Module):
         mel_outputs, gate_outputs, alignments = [], [], []
         while True:
             decoder_input = self.prenet(decoder_input)
-            mel_output, gate_output, alignment = self.decode(decoder_input)
+            mel_output, gate_output, alignment = self.decode(decoder_input, speaker_embedding)
 
             mel_outputs += [mel_output.squeeze(1)]
             gate_outputs += [gate_output]
@@ -452,3 +452,19 @@ class Decoder(nn.Module):
             mel_outputs, gate_outputs, alignments)
 
         return mel_outputs, gate_outputs, alignments
+
+
+class AdversarialClassifier(nn.Module):
+    def __init__(self, in_dim, sizes):
+        super(AdversarialClassifier, self).__init__()
+        in_sizes = [in_dim] + sizes[:-1]
+        self.gradient_rev = GradientReversal()
+        self.layers = nn.ModuleList(
+            [LinearNorm(in_size, out_size, bias=True, w_init_gain='relu')
+             for (in_size, out_size) in zip(in_sizes, sizes)])
+
+    def forward(self, x):
+        x = self.gradient_rev(x)
+        for linear in self.layers:
+            x = F.relu(linear(x))
+        return x
