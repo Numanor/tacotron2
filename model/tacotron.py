@@ -56,7 +56,8 @@ class Tacotron2(torch.nn.Module):
 
     def parse_output(self, outputs, output_lengths=None):
         if self.mask_padding and output_lengths is not None:
-            mask = ~get_mask_from_lengths(output_lengths)
+            output_total_length = outputs[0].size(2)
+            mask = ~get_mask_from_lengths(output_lengths, output_total_length)
             mask = mask.expand(self.n_mel_channels, mask.size(0), mask.size(1))
             if mask.size(2)%self.n_frames_per_step != 0 :
                 to_append = torch.ones( mask.size(0), mask.size(1), (self.n_frames_per_step-mask.size(2)%self.n_frames_per_step) ).bool().to(mask.device)
