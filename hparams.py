@@ -12,8 +12,6 @@ class Hparams:
         self.dynamic_loss_scaling = True
         self.fp16_run = False
         self.distributed_run = False
-        self.dist_backend = "nccl"
-        self.dist_url = "tcp://localhost:54321"
         self.cudnn_enabled = True
         self.cudnn_benchmark = False
         self.ignore_layers = ["embedding.weight"]

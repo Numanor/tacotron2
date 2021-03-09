@@ -5,9 +5,6 @@ import math
 from numpy import finfo
 
 import torch
-from multiproc.distributed import apply_gradient_allreduce
-import torch.distributed as dist
-from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
 from model.tacotron import Tacotron2, Tacotron2Loss
@@ -17,45 +14,14 @@ from utils.utils import data_parallel_workaround
 from hparams import create_hparams
 
 
-def reduce_tensor(tensor, n_gpus):
-    rt = tensor.clone()
-    dist.all_reduce(rt, op=dist.reduce_op.SUM)
-    rt /= n_gpus
-    return rt
-
-
-def init_distributed(hparams, n_gpus, rank, group_name):
-    assert torch.cuda.is_available(), "Distributed mode requires CUDA."
-    print("Initializing Distributed")
-
-    # Set cuda device so everything is done on the right GPU.
-    torch.cuda.set_device(rank % torch.cuda.device_count())
-
-    # Initialize distributed communication
-    dist.init_process_group(
-        backend=hparams.dist_backend, init_method=hparams.dist_url,
-        world_size=n_gpus, rank=rank, group_name=group_name)
-
-    print("Done initializing distributed")
-
-
 def prepare_dataloaders(hparams):
     # Get data, data loaders and collate function ready
     trainset = TextMelDataset(hparams.training_files, hparams)
     valset = TextMelDataset(hparams.validation_files, hparams)
     collate_fn = TextMelCollate(hparams.n_frames_per_step)
 
-    #if hparams.distributed_run:
-    #    train_sampler = DistributedSampler(trainset)
-    #    shuffle = False
-    #else:
-    #    train_sampler = None
-    #    shuffle = True
-    train_sampler = None
-    shuffle = True
-
-    train_loader = DataLoader(trainset, num_workers=1, shuffle=shuffle,
-                              sampler=train_sampler,
+    train_loader = DataLoader(trainset, num_workers=1, shuffle=True,
+                              sampler=None,
                               batch_size=hparams.batch_size, pin_memory=False,
                               drop_last=True, collate_fn=collate_fn)
     return train_loader, valset, collate_fn
@@ -76,9 +42,6 @@ def load_model(hparams):
     model = Tacotron2(hparams).cuda()
     if hparams.fp16_run:
         model.decoder.attention_layer.score_mask_value = finfo('float16').min
-
-    #if hparams.distributed_run:
-    #    model = apply_gradient_allreduce(model)
 
     return model
 
@@ -125,9 +88,7 @@ def validate(model, criterion, valset, iteration, batch_size, n_gpus,
     """Handles all the validation scoring and printing"""
     model.eval()
     with torch.no_grad():
-        #val_sampler = DistributedSampler(valset) if distributed_run else None
-        val_sampler = None
-        val_loader = DataLoader(valset, sampler=val_sampler, num_workers=1,
+        val_loader = DataLoader(valset, sampler=None, num_workers=1,
                                 shuffle=False, batch_size=batch_size,
                                 pin_memory=False, collate_fn=collate_fn)
 
@@ -136,12 +97,7 @@ def validate(model, criterion, valset, iteration, batch_size, n_gpus,
             x, y = model.parse_batch(batch)
             y_pred = model(x)
             loss = criterion(y_pred, y)
-            #if distributed_run:
-            #    reduced_val_loss = reduce_tensor(loss.data, n_gpus).item()
-            #else:
-            #    reduced_val_loss = loss.item()
-            reduced_val_loss = loss.item()
-            val_loss += reduced_val_loss
+            val_loss += loss.item()
         val_loss = val_loss / (i + 1)
 
     model.train()
@@ -163,8 +119,6 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
     rank (int): rank of current gpu
     hparams (object): comma separated list of "name=value" pairs.
     """
-    #if hparams.distributed_run:
-    #    init_distributed(hparams, n_gpus, rank, group_name)
 
     torch.manual_seed(hparams.seed)
     torch.cuda.manual_seed(hparams.seed)
@@ -178,9 +132,6 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
         from apex import amp
         model, optimizer = amp.initialize(
             model, optimizer, opt_level='O2')
-
-    #if hparams.distributed_run:
-    #    model = apply_gradient_allreduce(model)
 
     criterion = Tacotron2Loss()
 
@@ -216,18 +167,15 @@ def train(output_directory, log_directory, checkpoint_path, warm_start, n_gpus,
 
             model.zero_grad()
             x, y = model.parse_batch(batch)
-            #y_pred = model(x)
+
             if hparams.distributed_run and torch.cuda.device_count() > 1:
                 y_pred = data_parallel_workaround(model, x)
             else:
                 y_pred = model(x)
 
             loss = criterion(y_pred, y)
-            #if hparams.distributed_run:
-            #    reduced_loss = reduce_tensor(loss.data, n_gpus).item()
-            #else:
-            #    reduced_loss = loss.item()
             reduced_loss = loss.item()
+
             if hparams.fp16_run:
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
                     scaled_loss.backward()

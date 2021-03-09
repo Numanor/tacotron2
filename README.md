@@ -6,7 +6,9 @@ Wavenet On Mel Spectrogram Predictions](https://arxiv.org/pdf/1712.05884.pdf).
 This implementation includes **distributed** and **automatic mixed precision** support
 and uses the [LJSpeech dataset](https://keithito.com/LJ-Speech-Dataset/).
 
-Distributed and Automatic Mixed Precision support relies on NVIDIA's [Apex] and [AMP].
+Distributed support relies on PyTorch's [native *nn.parallel* primitives](https://pytorch.org/tutorials/beginner/former_torchies/parallelism_tutorial.html).
+
+Automatic Mixed Precision support relies on NVIDIA's [AMP].
 
 Visit our [website] for audio samples using our published [Tacotron 2] and
 [WaveGlow] models.
@@ -27,8 +29,7 @@ Visit our [website] for audio samples using our published [Tacotron 2] and
     - Change `training_files` and `validation_files` in [hparams.py](hparams.py) to the above two files respectively
     - Make necessary modifications to `files_to_list` to retrieve **'mel_file_path'** and **'text'** in [utils/dataset.py](utils/dataset.py)
 6. Install [PyTorch 1.0]
-7. Install [Apex]
-8. Install python requirements or build docker image 
+7. Install python requirements or build docker image 
     - Install python requirements: `pip install -r requirements.txt`
 
 ## Training
@@ -42,8 +43,11 @@ By default, the dataset dependent text embedding layers are [ignored]
 1. Download our published [Tacotron 2] model
 2. `python train.py --output_directory=outdir --log_directory=logdir -c tacotron2_statedict.pt --warm_start`
 
-## Multi-GPU (distributed) and Automatic Mixed Precision Training
-1. `python -m multiproc train.py --output_directory=outdir --log_directory=logdir --hparams=distributed_run=True,fp16_run=True`
+## Multi-GPU (distributed) Training
+1. `python train.py --output_directory=outdir --log_directory=logdir --hparams=distributed_run=True`
+
+## Automatic Mixed Precision Training
+1. `python train.py --output_directory=outdir --log_directory=logdir --hparams=fp16_run=True`
 
 ## Inference demo
 1. Download our published [Tacotron 2] model
