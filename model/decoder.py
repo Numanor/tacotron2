@@ -11,42 +11,56 @@ from utils.utils import get_mask_from_lengths
 
 
 class Decoder(nn.Module):
-    def __init__(self, hparams):
+    def __init__(self,
+                 n_mel_channels: int=80,
+                 n_frames_per_step: int=3,
+                 encoder_embedding_dim: int=512,
+                 attention_rnn_dim: int=1024,
+                 attention_dim: int=128,
+                 attention_location_n_filters: int=32,
+                 attention_location_kernel_size: int=31,
+                 decoder_rnn_dim: int=1024,
+                 prenet_dim: int=256,
+                 max_decoder_steps: int=1000,
+                 gate_threshold: float=0.5,
+                 p_attention_dropout: float=0.1,
+                 p_decoder_dropout: float=0.1):
+        
         super(Decoder, self).__init__()
-        self.n_mel_channels = hparams.n_mel_channels
-        self.n_frames_per_step = hparams.n_frames_per_step
-        self.encoder_embedding_dim = hparams.encoder_embedding_dim
-        self.attention_rnn_dim = hparams.attention_rnn_dim
-        self.decoder_rnn_dim = hparams.decoder_rnn_dim
-        self.prenet_dim = hparams.prenet_dim
-        self.max_decoder_steps = hparams.max_decoder_steps
-        self.gate_threshold = hparams.gate_threshold
-        self.p_attention_dropout = hparams.p_attention_dropout
-        self.p_decoder_dropout = hparams.p_decoder_dropout
+        self.n_mel_channels = n_mel_channels
+        self.n_frames_per_step = n_frames_per_step
+        self.encoder_embedding_dim = encoder_embedding_dim
+        self.attention_rnn_dim = attention_rnn_dim
+        self.decoder_rnn_dim = decoder_rnn_dim
+        self.prenet_dim = prenet_dim
+        self.max_decoder_steps = max_decoder_steps
+        self.gate_threshold = gate_threshold
+        self.p_attention_dropout = p_attention_dropout
+        self.p_decoder_dropout = p_decoder_dropout
 
         self.prenet = Prenet(
-            hparams.n_mel_channels * hparams.n_frames_per_step,
-            [hparams.prenet_dim, hparams.prenet_dim])
+            n_mel_channels * n_frames_per_step,
+            [prenet_dim, prenet_dim])
 
         self.attention_rnn = nn.LSTMCell(
-            hparams.prenet_dim + hparams.encoder_embedding_dim,
-            hparams.attention_rnn_dim)
+            prenet_dim + encoder_embedding_dim,
+            attention_rnn_dim)
 
         self.attention_layer = Attention(
-            hparams.attention_rnn_dim, hparams.encoder_embedding_dim,
-            hparams.attention_dim, hparams.attention_location_n_filters,
-            hparams.attention_location_kernel_size)
+            attention_rnn_dim, encoder_embedding_dim,
+            attention_dim, attention_location_n_filters,
+            attention_location_kernel_size)
 
         self.decoder_rnn = nn.LSTMCell(
-            hparams.attention_rnn_dim + hparams.encoder_embedding_dim,
-            hparams.decoder_rnn_dim, 1)
+            attention_rnn_dim + encoder_embedding_dim,
+            decoder_rnn_dim, 1)
 
         self.linear_projection = LinearNorm(
-            hparams.decoder_rnn_dim + hparams.encoder_embedding_dim,
-            hparams.n_mel_channels * hparams.n_frames_per_step)
+            decoder_rnn_dim + encoder_embedding_dim,
+            n_mel_channels * n_frames_per_step)
 
         self.gate_layer = LinearNorm(
-            hparams.decoder_rnn_dim + hparams.encoder_embedding_dim, 1,
+            decoder_rnn_dim + encoder_embedding_dim, 1,
             bias=True, w_init_gain='sigmoid')
 
     def get_go_frame(self, memory):

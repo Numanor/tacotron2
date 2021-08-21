@@ -10,37 +10,38 @@ class Postnet(nn.Module):
         - Five 1-d convolution with 512 channels and kernel size 5
     """
 
-    def __init__(self, hparams):
+    def __init__(self, n_mel_channels: int=80, postnet_embedding_dim: int=512,
+                 postnet_n_convolutions: int=5, postnet_kernel_size: int=5):
         super(Postnet, self).__init__()
         self.convolutions = nn.ModuleList()
 
         self.convolutions.append(
             nn.Sequential(
-                ConvNorm(hparams.n_mel_channels, hparams.postnet_embedding_dim,
-                         kernel_size=hparams.postnet_kernel_size, stride=1,
-                         padding=int((hparams.postnet_kernel_size - 1) / 2),
+                ConvNorm(n_mel_channels, postnet_embedding_dim,
+                         kernel_size=postnet_kernel_size, stride=1,
+                         padding=int((postnet_kernel_size - 1) / 2),
                          dilation=1, w_init_gain='tanh'),
-                nn.BatchNorm1d(hparams.postnet_embedding_dim))
+                nn.BatchNorm1d(postnet_embedding_dim))
         )
 
-        for i in range(1, hparams.postnet_n_convolutions - 1):
+        for i in range(1, postnet_n_convolutions - 1):
             self.convolutions.append(
                 nn.Sequential(
-                    ConvNorm(hparams.postnet_embedding_dim,
-                             hparams.postnet_embedding_dim,
-                             kernel_size=hparams.postnet_kernel_size, stride=1,
-                             padding=int((hparams.postnet_kernel_size - 1) / 2),
+                    ConvNorm(postnet_embedding_dim,
+                             postnet_embedding_dim,
+                             kernel_size=postnet_kernel_size, stride=1,
+                             padding=int((postnet_kernel_size - 1) / 2),
                              dilation=1, w_init_gain='tanh'),
-                    nn.BatchNorm1d(hparams.postnet_embedding_dim))
+                    nn.BatchNorm1d(postnet_embedding_dim))
             )
 
         self.convolutions.append(
             nn.Sequential(
-                ConvNorm(hparams.postnet_embedding_dim, hparams.n_mel_channels,
-                         kernel_size=hparams.postnet_kernel_size, stride=1,
-                         padding=int((hparams.postnet_kernel_size - 1) / 2),
+                ConvNorm(postnet_embedding_dim, n_mel_channels,
+                         kernel_size=postnet_kernel_size, stride=1,
+                         padding=int((postnet_kernel_size - 1) / 2),
                          dilation=1, w_init_gain='linear'),
-                nn.BatchNorm1d(hparams.n_mel_channels))
+                nn.BatchNorm1d(n_mel_channels))
             )
 
     def forward(self, x):

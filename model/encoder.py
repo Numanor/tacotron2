@@ -9,23 +9,24 @@ class Encoder(nn.Module):
         - Three 1-d convolution banks
         - Bidirectional LSTM
     """
-    def __init__(self, hparams):
+    def __init__(self, encoder_n_convolutions: int=3, encoder_embedding_dim: int=512,
+                 encoder_kernel_size: int=5):
         super(Encoder, self).__init__()
 
         convolutions = []
-        for _ in range(hparams.encoder_n_convolutions):
+        for _ in range(encoder_n_convolutions):
             conv_layer = nn.Sequential(
-                ConvNorm(hparams.encoder_embedding_dim,
-                         hparams.encoder_embedding_dim,
-                         kernel_size=hparams.encoder_kernel_size, stride=1,
-                         padding=int((hparams.encoder_kernel_size - 1) / 2),
+                ConvNorm(encoder_embedding_dim,
+                         encoder_embedding_dim,
+                         kernel_size=encoder_kernel_size, stride=1,
+                         padding=int((encoder_kernel_size - 1) / 2),
                          dilation=1, w_init_gain='relu'),
-                nn.BatchNorm1d(hparams.encoder_embedding_dim))
+                nn.BatchNorm1d(encoder_embedding_dim))
             convolutions.append(conv_layer)
         self.convolutions = nn.ModuleList(convolutions)
 
-        self.lstm = nn.LSTM(hparams.encoder_embedding_dim,
-                            int(hparams.encoder_embedding_dim / 2), 1,
+        self.lstm = nn.LSTM(encoder_embedding_dim,
+                            int(encoder_embedding_dim / 2), 1,
                             batch_first=True, bidirectional=True)
 
     def forward(self, x, input_lengths):
