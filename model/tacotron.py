@@ -2,7 +2,9 @@ from math import sqrt
 
 import torch
 
-from .model import Encoder, Decoder, Postnet
+from .encoder import Encoder
+from. decoder import Decoder
+from .postnet import Postnet
 from utils.utils import to_gpu, get_mask_from_lengths
 
 
