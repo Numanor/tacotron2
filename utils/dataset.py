@@ -1,9 +1,41 @@
-import os
 import random
 import numpy as np
 import torch
+from typing import List, Optional
+from pytorch_lightning import LightningDataModule
+from torch.utils.data.dataloader import DataLoader
 
 from text import text_to_sequence
+
+
+class TextMelDataModule(LightningDataModule):
+    def __init__(self, meta_train: str, meta_valid: str, mel_dir: str,
+                 n_mel_channels: int=80, n_frames_per_step: int=3,
+                 batch_size: int=32, symbols_lang: str="en",
+                 text_cleaners: List[str]=["basic_cleaners"]):
+
+        super(TextMelDataModule, self).__init__()
+        # self.save_hyperparameters()
+        self.meta_train = meta_train
+        self.meta_valid = meta_valid
+        self.mel_dir = mel_dir
+        self.n_mel_channels = n_mel_channels
+        self.batch_size = batch_size
+        self.symbols_lang = symbols_lang
+        self.text_cleaners = text_cleaners
+        self.collate_fn = TextMelCollate(n_frames_per_step)
+    
+    def setup(self, stage: Optional[str]):
+        self.trainset = TextMelDataset(self.meta_train, self.text_cleaners, self.symbols_lang, self.n_mel_channels)
+        self.validset = TextMelDataset(self.meta_valid, self.text_cleaners, self.symbols_lang, self.n_mel_channels)
+    
+    def train_dataloader(self):
+        return DataLoader(self.trainset, batch_size=self.batch_size,
+                          shuffle=True, num_workers=30, collate_fn=self.collate_fn)
+    
+    def val_dataloader(self):
+        return DataLoader(self.validset, batch_size=self.batch_size,        
+                          shuffle=False, num_workers=56, collate_fn=self.collate_fn)
 
 
 class TextMelDataset(torch.utils.data.Dataset):
@@ -12,12 +44,11 @@ class TextMelDataset(torch.utils.data.Dataset):
         2) normalizes text and converts them to sequences of one-hot vectors
         3) loads mel-spectrograms from mel files
     """
-    def __init__(self, fname, hparams):
-        self.text_cleaners  = hparams.text_cleaners
-        self.symbols_lang   = hparams.symbols_lang
-        self.n_mel_channels = hparams.n_mel_channels
+    def __init__(self, fname: str, text_cleaners: List[str], symbols_lang: str, n_mel_channels: int):
+        self.text_cleaners  = text_cleaners
+        self.symbols_lang   = symbols_lang
+        self.n_mel_channels = n_mel_channels
         self.f_list = self.files_to_list(fname)
-        random.seed(hparams.seed)
         random.shuffle(self.f_list)
 
     def files_to_list(self, file_path):

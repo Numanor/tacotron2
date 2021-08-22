@@ -1,25 +1,24 @@
 from math import sqrt
-
+import random
 import torch
 from pytorch_lightning import LightningModule
 
 from utils.utils import get_mask_from_lengths
 from text import symbols
 
+from utils.plot import plot_alignment_to_numpy, plot_spectrogram_to_numpy
+from utils.plot import plot_gate_outputs_to_numpy
+
 
 class Tacotron2(LightningModule):
     def __init__(self, encoder: torch.nn.Module, decoder: torch.nn.Module, 
                  postnet: torch.nn.Module, mask_padding: bool=True,
                  n_mel_channels: int=80, n_frames_per_step: int=3,
-                 symbols_lang: str="en", symbols_embedding_dim: int=512,
-                 learning_rate: float=1e-3, weight_decay: float=1e-6):
+                 symbols_lang: str="en", symbols_embedding_dim: int=512):
 
         super(Tacotron2, self).__init__()
-        self.automatic_optimization = False
 
-        self.save_hyperparameters("mask_padding", "n_mel_channels", "n_frames_per_step", "symbols_lang", "symbols_embedding_dim")
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
+        self.save_hyperparameters()
 
         n_symbols = len(symbols(self.hparams.symbols_lang))
         self.embedding = torch.nn.Embedding(
@@ -32,6 +31,8 @@ class Tacotron2(LightningModule):
         self.decoder = decoder
         self.postnet = postnet
 
+        print("got tacotron")
+
     def parse_batch(self, batch):
         text_padded, input_lengths, mel_padded, gate_padded, output_lengths = batch
 
@@ -39,12 +40,12 @@ class Tacotron2(LightningModule):
                 (mel_padded, gate_padded))
 
     def parse_output(self, outputs, output_lengths=None):
-        if self.mask_padding and output_lengths is not None:
+        if self.hparams.mask_padding and output_lengths is not None:
             output_total_length = outputs[0].size(2)
             mask = ~get_mask_from_lengths(output_lengths, output_total_length)
-            mask = mask.expand(self.n_mel_channels, mask.size(0), mask.size(1))
-            if mask.size(2)%self.n_frames_per_step != 0 :
-                to_append = torch.ones( mask.size(0), mask.size(1), (self.n_frames_per_step-mask.size(2)%self.n_frames_per_step) ).bool().to(mask.device)
+            mask = mask.expand(self.hparams.n_mel_channels, mask.size(0), mask.size(1))
+            if mask.size(2)%self.hparams.n_frames_per_step != 0 :
+                to_append = torch.ones( mask.size(0), mask.size(1), (self.hparams.n_frames_per_step-mask.size(2)%self.hparams.n_frames_per_step) ).bool()
                 mask = torch.cat([mask, to_append], dim=-1)
             mask = mask.permute(1, 0, 2)
 
@@ -99,8 +100,48 @@ class Tacotron2(LightningModule):
 
         return outputs
 
+
+    def log_validation(self, reduced_loss, y, y_pred, iteration):
+        self.log("validation.loss", reduced_loss)
+        _, mel_outputs, gate_outputs, alignments = y_pred
+        mel_targets, gate_targets = y
+
+        # plot distribution of parameters
+        for tag, value in self.named_parameters():
+            tag = tag.replace('.', '/')
+            self.logger.experiment.add_histogram(tag, value, iteration)
+
+        # plot alignment, mel target and predicted, gate target and predicted
+        idx = random.randint(0, alignments.size(0) - 1)
+        self.logger.experiment.add_image(
+            "alignment",
+            plot_alignment_to_numpy(alignments[idx].data.cpu().numpy().T),
+            iteration, dataformats='HWC')
+        self.logger.experiment.add_image(
+            "mel_target",
+            plot_spectrogram_to_numpy(mel_targets[idx].data.cpu().numpy()),
+            iteration, dataformats='HWC')
+        self.logger.experiment.add_image(
+            "mel_predicted",
+            plot_spectrogram_to_numpy(mel_outputs[idx].data.cpu().numpy()),
+            iteration, dataformats='HWC')
+        self.logger.experiment.add_image(
+            "gate",
+            plot_gate_outputs_to_numpy(
+                gate_targets[idx].data.cpu().numpy(),
+                torch.sigmoid(gate_outputs[idx]).data.cpu().numpy()),
+            iteration, dataformats='HWC')
+
     def training_step(self, batch, batch_idx):
         x, y = self.parse_batch(batch)
         y_pred = self(x)
         loss = self.compute_loss(y_pred, y)
+        self.log("train.loss", loss)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = self.parse_batch(batch)
+        y_pred = self(x)
+        loss = self.compute_loss(y_pred, y)
+        self.log_validation(loss, y, y_pred, self.global_step)
         return loss
