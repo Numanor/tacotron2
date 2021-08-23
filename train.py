@@ -1,10 +1,13 @@
+import os
 import torch
 
 from pytorch_lightning.utilities.cli import LightningCLI
 
 from model.tacotron import Tacotron2
 from utils.dataset import TextMelDataModule
+from utils.trainer import MyTestTubeTrainer
 
+    
 class MyLightningCLI(LightningCLI):
     def add_arguments_to_parser(self, parser):
         parser.add_optimizer_args(torch.optim.Adam)
@@ -29,4 +32,6 @@ class MyLightningCLI(LightningCLI):
 
 
 if __name__ == "__main__":
-    cli = MyLightningCLI(Tacotron2, TextMelDataModule)
+    cli = MyLightningCLI(Tacotron2, TextMelDataModule,
+                         trainer_class=MyTestTubeTrainer,
+                         save_config_overwrite=True)
