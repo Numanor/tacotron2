@@ -1,11 +1,12 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+from pytorch_lightning import LightningModule
 
 from .layers import ConvNorm
 
 
-class Postnet(nn.Module):
+class Postnet(LightningModule):
     """Postnet
         - Five 1-d convolution with 512 channels and kernel size 5
     """
@@ -13,6 +14,9 @@ class Postnet(nn.Module):
     def __init__(self, n_mel_channels: int=80, postnet_embedding_dim: int=512,
                  postnet_n_convolutions: int=5, postnet_kernel_size: int=5):
         super(Postnet, self).__init__()
+        self.save_hyperparameters()
+        print(self.hparams)
+
         self.convolutions = nn.ModuleList()
 
         self.convolutions.append(

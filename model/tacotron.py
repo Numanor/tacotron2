@@ -11,27 +11,40 @@ from utils.plot import plot_gate_outputs_to_numpy
 
 
 class Tacotron2(LightningModule):
-    def __init__(self, encoder: torch.nn.Module, decoder: torch.nn.Module, 
-                 postnet: torch.nn.Module, mask_padding: bool=True,
+    def __init__(self, encoder: LightningModule, decoder: LightningModule, 
+                 postnet: LightningModule, mask_padding: bool=True,
                  n_mel_channels: int=80, n_frames_per_step: int=3,
-                 symbols_lang: str="en", symbols_embedding_dim: int=512):
+                 symbols_lang: str="en", symbols_embedding_dim: int=512,
+                 freeze_text: bool=False, load_pretrained_text: str=None):
 
         super(Tacotron2, self).__init__()
 
         self.save_hyperparameters()
 
-        n_symbols = len(symbols(self.hparams.symbols_lang))
-        self.embedding = torch.nn.Embedding(
-            n_symbols, self.hparams.symbols_embedding_dim)
-        std = sqrt(2.0 / (n_symbols + self.hparams.symbols_embedding_dim))
-        val = sqrt(3.0) * std  # uniform bounds for std
-        self.embedding.weight.data.uniform_(-val, val)
+        # init embedding table and text encoder
+        if load_pretrained_text != None:
+            _pretrained_taco = Tacotron2.load_from_checkpoint(load_pretrained_text, map_location="cpu")
+            self.encoder = _pretrained_taco.encoder.to(self.device)
+            self.embedding = _pretrained_taco.embedding.to(self.device)
+            assert self.encoder.device == self.device == self.embedding.weight.device
+            del encoder
+            del _pretrained_taco
+        else:
+            n_symbols = len(symbols(self.hparams.symbols_lang))
+            self.embedding = torch.nn.Embedding(
+                n_symbols, self.hparams.symbols_embedding_dim)
+            std = sqrt(2.0 / (n_symbols + self.hparams.symbols_embedding_dim))
+            val = sqrt(3.0) * std  # uniform bounds for std
+            self.embedding.weight.data.uniform_(-val, val)
 
-        self.encoder = encoder
+            self.encoder = encoder
+
+        if freeze_text:
+            self.embedding.weight.requires_grad = False
+            self.encoder.freeze()
+
         self.decoder = decoder
         self.postnet = postnet
-
-        print("got tacotron")
 
     def parse_batch(self, batch):
         text_padded, input_lengths, mel_padded, gate_padded, output_lengths = batch

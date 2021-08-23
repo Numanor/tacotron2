@@ -1,10 +1,12 @@
+from pytorch_lightning.core.lightning import LightningModule
 from torch import nn
 from torch.nn import functional as F
+from pytorch_lightning.core.datamodule import LightningDataModule
 
 from .layers import ConvNorm
 
 
-class Encoder(nn.Module):
+class Encoder(LightningModule):
     """Encoder module:
         - Three 1-d convolution banks
         - Bidirectional LSTM
@@ -12,6 +14,8 @@ class Encoder(nn.Module):
     def __init__(self, encoder_n_convolutions: int=3, encoder_embedding_dim: int=512,
                  encoder_kernel_size: int=5):
         super(Encoder, self).__init__()
+        self.save_hyperparameters()
+        print("encoder: ", self.hparams)
 
         convolutions = []
         for _ in range(encoder_n_convolutions):

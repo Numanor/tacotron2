@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.autograd import Variable
+from pytorch_lightning import LightningModule
 
 from .layers import LinearNorm
 from .prenet import Prenet
@@ -10,7 +11,7 @@ from .lsa import Attention
 from utils.utils import get_mask_from_lengths
 
 
-class Decoder(nn.Module):
+class Decoder(LightningModule):
     def __init__(self,
                  n_mel_channels: int=80,
                  n_frames_per_step: int=3,
@@ -27,6 +28,8 @@ class Decoder(nn.Module):
                  p_decoder_dropout: float=0.1):
         
         super(Decoder, self).__init__()
+        self.save_hyperparameters()
+        print("decoder: ", self.hparams)
         self.n_mel_channels = n_mel_channels
         self.n_frames_per_step = n_frames_per_step
         self.encoder_embedding_dim = encoder_embedding_dim

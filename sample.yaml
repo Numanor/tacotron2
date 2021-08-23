@@ -9,6 +9,8 @@ model:
   mask_padding: True
   n_frames_per_step: 3
   symbols_embedding_dim: 512
+  freeze_text: false
+  load_pretrained_text: /path/to/load/pretrained/encoder
   encoder:
     class_path: model.encoder.Encoder
     init_args:
