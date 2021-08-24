@@ -17,6 +17,7 @@ Supports the following Pinyin-with-label string (Pinyin with prosodic structure 
   Author: johnson.tsing@gmail.com
 '''
 
+from .cmudict import _valid_symbol_set
 
 # Mandarin initials (普通话声母列表)
 _initials = ['b', 'p', 'f', 'm', \
@@ -42,7 +43,7 @@ _finals = ['a',  'ai', 'ao',  'an',  'ang', \
 _retroflex = ['rr']
 
 # Tones (声调信息)
-_tones = ['1', '2', '3', '4', '5']
+_tones = ['1', '2', '3', '4', '5', '6']
 
 # Prosodic structure symbols (韵律结构标记)
 _prosodic_struct = ['-', ' ', '/', ',', '.', '?', '!']
@@ -189,7 +190,9 @@ def pinyin_to_symbols(text):
   for token in tokens:
     if token == '|':
       symbols.append(' ')
-    elif token in ['-', '/', ',', '.', '?', '!']:
+    elif token in _prosodic_struct:
+      symbols.append(token)
+    elif token in _valid_symbol_set:
       symbols.append(token)
     else:
       (initial, final, retroflex, tone) = split_pinyin(token)

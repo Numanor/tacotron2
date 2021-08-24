@@ -29,9 +29,14 @@ en_symbols = [_pad, _eos] + list(_characters) + list(_digits) #+ _arpabet
 # Chinese Pinyin symbols (intitial, final, tone, etc)
 zh_py_symbols = [_pad, _eos] + pinyin.symbols
 
+# Chinese Pinyin symbols extened with cmudict
+ex_py_symbols = zh_py_symbols + cmudict.valid_symbols
+
 # Export symbols according to language tag
 def symbols(lang):
-  if lang == 'py':
+  if lang == 'py_ex':
+    return ex_py_symbols
+  elif lang == 'py':
     return zh_py_symbols
   elif lang == 'en':
     return en_symbols

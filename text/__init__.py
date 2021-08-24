@@ -21,7 +21,7 @@ def _change_lang(lang):
 _curly_re = re.compile(r'(.*?)\{(.+?)\}(.*)')
 
 
-def text_to_sequence(text, cleaner_names, lang):
+def text_to_sequence(text, cleaner_names, lang:str):
   '''Converts a string of text to a sequence of IDs corresponding to the symbols in the text.
 
     The text can optionally have ARPAbet sequences enclosed in curly braces embedded
@@ -39,8 +39,9 @@ def text_to_sequence(text, cleaner_names, lang):
   sequence = []
 
   # Chinese Pinyin symbols (initial, final, tone, etc)
-  if lang == 'py':
+  if lang.startswith('py'):
     sequence += _symbols_to_sequence(pinyin_to_symbols(text))
+    # sequence += _symbols_to_sequence(text)
 
   # other symbols (English characters)
   else:
@@ -83,6 +84,9 @@ def _clean_text(text, cleaner_names):
 
 
 def _symbols_to_sequence(symbols):
+  for s in symbols:
+    if not _should_keep_symbol(s):
+      raise ValueError(f"[{s}] in [{symbols}]")
   return [_symbol_to_id[s] for s in symbols if _should_keep_symbol(s)]
 
 
