@@ -1,5 +1,7 @@
 from math import sqrt
 import random
+from typing import Dict
+from numpy import mod
 import torch
 from pytorch_lightning import LightningModule
 
@@ -63,9 +65,9 @@ class Tacotron2(LightningModule):
         return ((text_padded, input_lengths, mel_padded, output_lengths, spkerID),
                 (mel_padded, gate_padded, spkerID))
 
-    def parse_output(self, outputs, output_lengths=None):
+    def parse_output(self, outputs: Dict, output_lengths=None):
         if self.hparams.mask_padding and output_lengths is not None:
-            output_total_length = outputs[0].size(2)
+            output_total_length = outputs["mel"].size(2)
             mask = ~get_mask_from_lengths(output_lengths, output_total_length)
             mask = mask.expand(self.hparams.n_mel_channels, mask.size(0), mask.size(1))
             if mask.size(2)%self.hparams.n_frames_per_step != 0 :
@@ -73,59 +75,59 @@ class Tacotron2(LightningModule):
                 mask = torch.cat([mask, to_append], dim=-1)
             mask = mask.permute(1, 0, 2)
 
-            outputs[0].data.masked_fill_(mask, 0.0) # mel_outputs
-            outputs[1].data.masked_fill_(mask, 0.0) # mel_outputs_postnet
-            outputs[2].data.masked_fill_(mask[:, 0, :], 1e3)  # gate energies
+            outputs["mel_raw"].data.masked_fill_(mask, 0.0)
+            outputs["mel"].data.masked_fill_(mask, 0.0)
+            outputs["gate"].data.masked_fill_(mask[:, 0, :], 1e3)
 
         return outputs
     
-    def compute_loss(self, model_output, targets):
-        for t in targets:
-            t.requires_grad = False
+    def compute_loss(self, model_output: Dict, targets: Dict):
+        for t in targets.values():
+            if t != None:
+                t.requires_grad = False
         
-        mel_target, gate_target = targets[0], targets[1]
-        gate_target = gate_target.view(-1, 1)
+        mel_target, gate_target = targets["mel"], targets["gate"].view(-1, 1)
 
-        mel_out, mel_out_postnet, gate_out, _align, speaker_predict = model_output
-        gate_out = gate_out.view(-1, 1)
-        mel_loss = torch.nn.MSELoss()(mel_out, mel_target) + \
-            torch.nn.MSELoss()(mel_out_postnet, mel_target)
+        mel_loss = torch.nn.MSELoss()(model_output["mel_raw"], mel_target) + \
+            torch.nn.MSELoss()(model_output["mel"], mel_target)
+
+        gate_out = model_output["gate"].view(-1, 1)
         gate_loss = torch.nn.BCEWithLogitsLoss()(gate_out, gate_target)
 
-        if speaker_predict != None:
-            speaker_predict = speaker_predict.transpose(1, 2) # (B, T, n_speaker) -> (B, n_speaker, T)
-            speaker_target = targets[2].unsqueeze(1).repeat(1, speaker_predict.size(2)) # (B) -> (B, T)
+        loss = {'mel_loss': mel_loss, 'gate_loss': gate_loss}
+
+        if "speaker" in model_output:
+            speaker_predict = model_output["speaker"].transpose(1, 2) # (B, T, n_speaker) -> (B, n_speaker, T)
+            speaker_target = targets["speaker"].unsqueeze(1).repeat(1, speaker_predict.size(2)) # (B) -> (B, T)
             speaker_loss = torch.nn.CrossEntropyLoss()(speaker_predict, speaker_target)
             speaker_loss = speaker_loss * self.hparams.speaker_loss_weight
-        else:
-            speaker_loss = 0.
+            loss['speaker_loss'] = speaker_loss
 
-        return mel_loss + gate_loss + speaker_loss
+        loss['loss'] = sum(loss.values())
+        return loss
 
 
-    def forward(self, inputs):
-        text_inputs, text_lengths, mels, output_lengths, speaker_ids = inputs
-        text_lengths, output_lengths = text_lengths.data, output_lengths.data
+    def forward(self, inputs: Dict):
+        inputs["text_len"], inputs["mel_len"] = inputs["text_len"].data, inputs["mel_len"].data
 
-        embedded_inputs = self.embedding(text_inputs).transpose(1, 2)
+        embedded_inputs = self.embedding(inputs["text"]).transpose(1, 2)
+        encoder_outputs = self.encoder(embedded_inputs, inputs["text_len"])
 
-        encoder_outputs = self.encoder(embedded_inputs, text_lengths)
-
+        outputs = dict({})
         if self.hparams.multi_speaker:
-            speaker_outputs = self.speaker_classifier(encoder_outputs) if self.speaker_classifier != None else None
-            speaker_embedded = self.speaker_embedding(speaker_ids)[:, None]
+            if self.speaker_classifier != None:
+                outputs["speaker"] = self.speaker_classifier(encoder_outputs)
+            speaker_embedded = self.speaker_embedding(inputs["speaker"])[:, None]
             speaker_embedded = speaker_embedded.repeat(1, encoder_outputs.size(1), 1)
             encoder_outputs = torch.cat((encoder_outputs, speaker_embedded), dim=2)
 
-        mel_outputs, gate_outputs, alignments = self.decoder(
-            encoder_outputs, mels, memory_lengths=text_lengths)
+        outputs["mel_raw"], outputs["gate"], outputs["align"] = self.decoder(
+            encoder_outputs, inputs["mel"], memory_lengths=inputs["text_len"])
 
-        mel_outputs_postnet = self.postnet(mel_outputs)
-        mel_outputs_postnet = mel_outputs + mel_outputs_postnet
+        postnet_outputs = self.postnet(outputs["mel_raw"])
+        outputs["mel"] = outputs["mel_raw"] + postnet_outputs
 
-        return self.parse_output(
-            [mel_outputs, mel_outputs_postnet, gate_outputs, alignments, speaker_outputs],
-            output_lengths)
+        return self.parse_output(outputs, inputs["mel_len"])
 
     def inference(self, inputs):
         embedded_inputs = self.embedding(inputs).transpose(1, 2)
@@ -141,11 +143,12 @@ class Tacotron2(LightningModule):
 
         return outputs
 
+    def log_loss(self, loss: Dict, prefix: str="training"):
+        for k, v in loss.items():
+            self.log(f"{prefix}.{k}", v)
 
-    def log_validation(self, reduced_loss, y, y_pred, iteration):
-        self.log("validation.loss", reduced_loss)
-        _mel_outputs, mel_outputs, gate_outputs, alignments, *_ = y_pred
-        mel_targets, gate_targets, *_ = y
+    def log_validation(self, reduced_loss: Dict, y: Dict, y_pred: Dict, iteration: int):
+        self.log_loss(reduced_loss, "validation")
 
         # plot distribution of parameters
         for tag, value in self.named_parameters():
@@ -153,36 +156,34 @@ class Tacotron2(LightningModule):
             self.logger.experiment.add_histogram(tag, value, iteration)
 
         # plot alignment, mel target and predicted, gate target and predicted
-        idx = random.randint(0, alignments.size(0) - 1)
+        idx = random.randint(0, y_pred["align"].size(0) - 1)
         self.logger.experiment.add_image(
             "alignment",
-            plot_alignment_to_numpy(alignments[idx].data.cpu().numpy().T),
+            plot_alignment_to_numpy(y_pred["align"][idx].data.cpu().numpy().T),
             iteration, dataformats='HWC')
         self.logger.experiment.add_image(
             "mel_target",
-            plot_spectrogram_to_numpy(mel_targets[idx].data.cpu().numpy()),
+            plot_spectrogram_to_numpy(y["mel"][idx].data.cpu().numpy()),
             iteration, dataformats='HWC')
         self.logger.experiment.add_image(
             "mel_predicted",
-            plot_spectrogram_to_numpy(mel_outputs[idx].data.cpu().numpy()),
+            plot_spectrogram_to_numpy(y_pred["mel"][idx].data.cpu().numpy()),
             iteration, dataformats='HWC')
         self.logger.experiment.add_image(
             "gate",
             plot_gate_outputs_to_numpy(
-                gate_targets[idx].data.cpu().numpy(),
-                torch.sigmoid(gate_outputs[idx]).data.cpu().numpy()),
+                y["gate"][idx].data.cpu().numpy(),
+                torch.sigmoid(y_pred["gate"][idx]).data.cpu().numpy()),
             iteration, dataformats='HWC')
 
-    def training_step(self, batch, batch_idx):
-        x, y = self.parse_batch(batch)
-        y_pred = self(x)
-        loss = self.compute_loss(y_pred, y)
-        self.log("train.loss", loss)
-        return loss
+    def training_step(self, batch: Dict, batch_idx):
+        y_pred = self(batch)
+        loss = self.compute_loss(y_pred, batch)
+        self.log_loss(loss)
+        return loss['loss']
 
-    def validation_step(self, batch, batch_idx):
-        x, y = self.parse_batch(batch)
-        y_pred = self(x)
-        loss = self.compute_loss(y_pred, y)
-        self.log_validation(loss, y, y_pred, self.global_step)
-        return loss
+    def validation_step(self, batch : Dict, batch_idx):
+        y_pred = self(batch)
+        loss = self.compute_loss(y_pred, batch)
+        self.log_validation(loss, batch, y_pred, self.global_step)
+        return loss['loss']

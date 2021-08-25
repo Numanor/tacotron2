@@ -1,7 +1,9 @@
 import random
+from pathlib import Path
+from typing import List, Optional
+
 import numpy as np
 import torch
-from typing import List, Optional
 from pytorch_lightning import LightningDataModule
 from torch.utils.data.dataloader import DataLoader
 
@@ -12,22 +14,26 @@ class TextMelDataModule(LightningDataModule):
     def __init__(self, meta_train: str, meta_valid: str, mel_dir: str,
                  n_mel_channels: int=80, n_frames_per_step: int=3,
                  batch_size: int=32, symbols_lang: str="en",
-                 text_cleaners: List[str]=["basic_cleaners"]):
+                 text_cleaners: List[str]=["basic_cleaners"],
+                 multi_speaker: bool=False, speaker_item_idx: int=None):
 
         super(TextMelDataModule, self).__init__()
-        # self.save_hyperparameters()
+        
         self.meta_train = meta_train
         self.meta_valid = meta_valid
-        self.mel_dir = mel_dir
+        self.mel_dir = Path(mel_dir)
         self.n_mel_channels = n_mel_channels
         self.batch_size = batch_size
         self.symbols_lang = symbols_lang
         self.text_cleaners = text_cleaners
         self.collate_fn = TextMelCollate(n_frames_per_step)
+        self.speakerItemIdx = speaker_item_idx if multi_speaker else None
     
     def setup(self, stage: Optional[str]):
-        self.trainset = TextMelDataset(self.meta_train, self.text_cleaners, self.symbols_lang, self.n_mel_channels)
-        self.validset = TextMelDataset(self.meta_valid, self.text_cleaners, self.symbols_lang, self.n_mel_channels)
+        self.trainset = TextMelDataset(self.meta_train, self.mel_dir, self.text_cleaners,
+                                       self.symbols_lang, self.n_mel_channels, self.speakerItemIdx)
+        self.validset = TextMelDataset(self.meta_valid, self.mel_dir, self.text_cleaners,
+                                       self.symbols_lang, self.n_mel_channels, self.speakerItemIdx)
     
     def train_dataloader(self):
         return DataLoader(self.trainset, batch_size=self.batch_size,
@@ -44,10 +50,15 @@ class TextMelDataset(torch.utils.data.Dataset):
         2) normalizes text and converts them to sequences of one-hot vectors
         3) loads mel-spectrograms from mel files
     """
-    def __init__(self, fname: str, text_cleaners: List[str], symbols_lang: str, n_mel_channels: int):
+    def __init__(self, fname: str, mel_dir: Path, 
+                 text_cleaners: List[str], symbols_lang: str,
+                 n_mel_channels: int,
+                 speakerItemIdx: int=None):
         self.text_cleaners  = text_cleaners
+        self.mel_dir = mel_dir
         self.symbols_lang   = symbols_lang
         self.n_mel_channels = n_mel_channels
+        self.speakerItemIdx = speakerItemIdx
         self.f_list = self.files_to_list(fname)
         random.shuffle(self.f_list)
 
@@ -56,22 +67,24 @@ class TextMelDataset(torch.utils.data.Dataset):
         with open(file_path, encoding = 'utf-8') as f:
             for line in f:
                 parts = line.strip().strip('\ufeff').split('|') #remove BOM
-                # mel_file_path
-                path  = parts[0]
-                # text
-                text  = parts[1]
-                f_list.append([text, path])
+                sample = [parts[-1], parts[0]] # [text, mel_file_path]
+                if self.speakerItemIdx != None:
+                    sample.append(int(parts[self.speakerItemIdx])-1)
+                f_list.append(sample)
         return f_list
 
-    def get_mel_text_pair(self, text, file_path):
+    def get_mel_text_pair(self, text, file_path, spkerID=None):
         text = self.get_text(text)
         mel = self.get_mel(file_path)
-        return (text, mel)
+        if spkerID != None:
+            return (text, mel, spkerID)
+        else:
+            return (text, mel)
 
     def get_mel(self, file_path):
         #stored melspec: np.ndarray [shape=(T_out, num_mels)]
         #in Pytorch [shape=(num_mels, T_out)]
-        melspec = torch.from_numpy(np.load(file_path).T)
+        melspec = torch.from_numpy(np.load(self.mel_dir/f"{file_path}.npy").T)
         assert melspec.size(0) == self.n_mel_channels, (
             'Mel dimension mismatch: given {}, expected {}'.format(melspec.size(0), self.n_mel_channels))
 
@@ -98,7 +111,7 @@ class TextMelCollate():
         """Collate's training batch from normalized text and mel-spectrogram
         PARAMS
         ------
-        batch: [text_normalized, mel_normalized]
+        batch: [text_normalized, mel_normalized, speaker_ID(optional)]
         """
         # Right zero-pad all one-hot text sequences to max input length
         input_lengths, ids_sorted_decreasing = torch.sort(
@@ -131,4 +144,18 @@ class TextMelCollate():
             gate_padded[i, mel.size(1)-1:] = 1
             output_lengths[i] = mel.size(1)
 
-        return text_padded, input_lengths, mel_padded, gate_padded, output_lengths
+        output = {
+            "text": text_padded,
+            "text_len": input_lengths,
+            "mel": mel_padded,
+            "gate": gate_padded,
+            "mel_len": output_lengths
+        }
+
+        if len(batch[0]) > 2:
+            spkerID = torch.LongTensor(len(ids_sorted_decreasing))
+            for i in range(len(ids_sorted_decreasing)):
+                spkerID[i] = batch[ids_sorted_decreasing[i]][2]
+            output["speaker"] = spkerID
+        
+        return output
