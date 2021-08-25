@@ -15,7 +15,6 @@ class Postnet(LightningModule):
                  postnet_n_convolutions: int=5, postnet_kernel_size: int=5):
         super(Postnet, self).__init__()
         self.save_hyperparameters()
-        print(self.hparams)
 
         self.convolutions = nn.ModuleList()
 

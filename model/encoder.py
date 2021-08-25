@@ -15,7 +15,6 @@ class Encoder(LightningModule):
                  encoder_kernel_size: int=5):
         super(Encoder, self).__init__()
         self.save_hyperparameters()
-        print("encoder: ", self.hparams)
 
         convolutions = []
         for _ in range(encoder_n_convolutions):

@@ -15,7 +15,7 @@ class Decoder(LightningModule):
     def __init__(self,
                  n_mel_channels: int=80,
                  n_frames_per_step: int=3,
-                 encoder_embedding_dim: int=512,
+                 input_ctx_dim: int=512,
                  attention_rnn_dim: int=1024,
                  attention_dim: int=128,
                  attention_location_n_filters: int=32,
@@ -29,10 +29,9 @@ class Decoder(LightningModule):
         
         super(Decoder, self).__init__()
         self.save_hyperparameters()
-        print("decoder: ", self.hparams)
         self.n_mel_channels = n_mel_channels
         self.n_frames_per_step = n_frames_per_step
-        self.encoder_embedding_dim = encoder_embedding_dim
+        self.input_ctx_dim = input_ctx_dim
         self.attention_rnn_dim = attention_rnn_dim
         self.decoder_rnn_dim = decoder_rnn_dim
         self.prenet_dim = prenet_dim
@@ -46,24 +45,24 @@ class Decoder(LightningModule):
             [prenet_dim, prenet_dim])
 
         self.attention_rnn = nn.LSTMCell(
-            prenet_dim + encoder_embedding_dim,
+            prenet_dim + input_ctx_dim,
             attention_rnn_dim)
 
         self.attention_layer = Attention(
-            attention_rnn_dim, encoder_embedding_dim,
+            attention_rnn_dim, input_ctx_dim,
             attention_dim, attention_location_n_filters,
             attention_location_kernel_size)
 
         self.decoder_rnn = nn.LSTMCell(
-            attention_rnn_dim + encoder_embedding_dim,
+            attention_rnn_dim + input_ctx_dim,
             decoder_rnn_dim, 1)
 
         self.linear_projection = LinearNorm(
-            decoder_rnn_dim + encoder_embedding_dim,
+            decoder_rnn_dim + input_ctx_dim,
             n_mel_channels * n_frames_per_step)
 
         self.gate_layer = LinearNorm(
-            decoder_rnn_dim + encoder_embedding_dim, 1,
+            decoder_rnn_dim + input_ctx_dim, 1,
             bias=True, w_init_gain='sigmoid')
 
     def get_go_frame(self, memory):
@@ -107,7 +106,7 @@ class Decoder(LightningModule):
         self.attention_weights_cum = Variable(memory.data.new(
             B, MAX_TIME).zero_())
         self.attention_context = Variable(memory.data.new(
-            B, self.encoder_embedding_dim).zero_())
+            B, self.input_ctx_dim).zero_())
 
         self.memory = memory
         self.processed_memory = self.attention_layer.memory_layer(memory)

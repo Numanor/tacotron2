@@ -3,11 +3,11 @@ import random
 import torch
 from pytorch_lightning import LightningModule
 
+from .layers import AdversarialClassifier
 from utils.utils import get_mask_from_lengths
 from text import symbols
 
-from utils.plot import plot_alignment_to_numpy, plot_spectrogram_to_numpy
-from utils.plot import plot_gate_outputs_to_numpy
+from utils.plot import plot_alignment_to_numpy, plot_spectrogram_to_numpy, plot_gate_outputs_to_numpy
 
 
 class Tacotron2(LightningModule):
@@ -15,7 +15,10 @@ class Tacotron2(LightningModule):
                  postnet: LightningModule, mask_padding: bool=True,
                  n_mel_channels: int=80, n_frames_per_step: int=3,
                  symbols_lang: str="en", symbols_embedding_dim: int=512,
-                 freeze_text: bool=False, load_pretrained_text: str=None):
+                 freeze_text: bool=False, load_pretrained_text: str=None,
+                 multi_speaker: bool=False, spker_embedding_dim: int=64,
+                 n_spker: int=1, speaker_loss_weight: float=0.02,
+                 speaker_classifier: AdversarialClassifier=None):
 
         super(Tacotron2, self).__init__()
 
@@ -30,10 +33,10 @@ class Tacotron2(LightningModule):
             del encoder
             del _pretrained_taco
         else:
-            n_symbols = len(symbols(self.hparams.symbols_lang))
+            n_symbols = len(symbols(symbols_lang))
             self.embedding = torch.nn.Embedding(
-                n_symbols, self.hparams.symbols_embedding_dim)
-            std = sqrt(2.0 / (n_symbols + self.hparams.symbols_embedding_dim))
+                n_symbols, symbols_embedding_dim)
+            std = sqrt(2.0 / (n_symbols + symbols_embedding_dim))
             val = sqrt(3.0) * std  # uniform bounds for std
             self.embedding.weight.data.uniform_(-val, val)
 
@@ -43,14 +46,22 @@ class Tacotron2(LightningModule):
             self.embedding.weight.requires_grad = False
             self.encoder.freeze()
 
+        if multi_speaker:
+            self.speaker_embedding = torch.nn.Embedding(
+                n_spker, spker_embedding_dim)
+            std = sqrt(2.0 / (n_spker + spker_embedding_dim))
+            val = sqrt(3.0) * std  # uniform bounds for std
+            self.speaker_embedding.weight.data.uniform_(-val, val)
+            self.speaker_classifier = speaker_classifier
+            
         self.decoder = decoder
         self.postnet = postnet
 
     def parse_batch(self, batch):
-        text_padded, input_lengths, mel_padded, gate_padded, output_lengths = batch
+        text_padded, input_lengths, mel_padded, gate_padded, output_lengths, spkerID = batch
 
-        return ((text_padded, input_lengths, mel_padded, output_lengths),
-                (mel_padded, gate_padded))
+        return ((text_padded, input_lengths, mel_padded, output_lengths, spkerID),
+                (mel_padded, gate_padded, spkerID))
 
     def parse_output(self, outputs, output_lengths=None):
         if self.hparams.mask_padding and output_lengths is not None:
@@ -69,25 +80,42 @@ class Tacotron2(LightningModule):
         return outputs
     
     def compute_loss(self, model_output, targets):
+        for t in targets:
+            t.requires_grad = False
+        
         mel_target, gate_target = targets[0], targets[1]
-        mel_target.requires_grad = False
-        gate_target.requires_grad = False
         gate_target = gate_target.view(-1, 1)
 
-        mel_out, mel_out_postnet, gate_out, _ = model_output
+        mel_out, mel_out_postnet, gate_out, _align, speaker_predict = model_output
         gate_out = gate_out.view(-1, 1)
         mel_loss = torch.nn.MSELoss()(mel_out, mel_target) + \
             torch.nn.MSELoss()(mel_out_postnet, mel_target)
         gate_loss = torch.nn.BCEWithLogitsLoss()(gate_out, gate_target)
-        return mel_loss + gate_loss
+
+        if speaker_predict != None:
+            speaker_predict = speaker_predict.transpose(1, 2) # (B, T, n_speaker) -> (B, n_speaker, T)
+            speaker_target = targets[2].unsqueeze(1).repeat(1, speaker_predict.size(2)) # (B) -> (B, T)
+            speaker_loss = torch.nn.CrossEntropyLoss()(speaker_predict, speaker_target)
+            speaker_loss = speaker_loss * self.hparams.speaker_loss_weight
+        else:
+            speaker_loss = 0.
+
+        return mel_loss + gate_loss + speaker_loss
+
 
     def forward(self, inputs):
-        text_inputs, text_lengths, mels, output_lengths = inputs
+        text_inputs, text_lengths, mels, output_lengths, speaker_ids = inputs
         text_lengths, output_lengths = text_lengths.data, output_lengths.data
 
         embedded_inputs = self.embedding(text_inputs).transpose(1, 2)
 
         encoder_outputs = self.encoder(embedded_inputs, text_lengths)
+
+        if self.hparams.multi_speaker:
+            speaker_outputs = self.speaker_classifier(encoder_outputs) if self.speaker_classifier != None else None
+            speaker_embedded = self.speaker_embedding(speaker_ids)[:, None]
+            speaker_embedded = speaker_embedded.repeat(1, encoder_outputs.size(1), 1)
+            encoder_outputs = torch.cat((encoder_outputs, speaker_embedded), dim=2)
 
         mel_outputs, gate_outputs, alignments = self.decoder(
             encoder_outputs, mels, memory_lengths=text_lengths)
@@ -96,7 +124,7 @@ class Tacotron2(LightningModule):
         mel_outputs_postnet = mel_outputs + mel_outputs_postnet
 
         return self.parse_output(
-            [mel_outputs, mel_outputs_postnet, gate_outputs, alignments],
+            [mel_outputs, mel_outputs_postnet, gate_outputs, alignments, speaker_outputs],
             output_lengths)
 
     def inference(self, inputs):
@@ -116,8 +144,8 @@ class Tacotron2(LightningModule):
 
     def log_validation(self, reduced_loss, y, y_pred, iteration):
         self.log("validation.loss", reduced_loss)
-        _, mel_outputs, gate_outputs, alignments = y_pred
-        mel_targets, gate_targets = y
+        _mel_outputs, mel_outputs, gate_outputs, alignments, *_ = y_pred
+        mel_targets, gate_targets, *_ = y
 
         # plot distribution of parameters
         for tag, value in self.named_parameters():

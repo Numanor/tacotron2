@@ -17,9 +17,10 @@ class MyLightningCLI(LightningCLI):
         parser.link_arguments("data.n_mel_channels", "model.decoder.init_args.n_mel_channels")
         parser.link_arguments("data.n_mel_channels", "model.postnet.init_args.n_mel_channels")
         parser.link_arguments("data.symbols_lang", "model.symbols_lang")
+        parser.link_arguments("model.multi_speaker", "data.multi_speaker")
         parser.link_arguments("model.n_frames_per_step", "data.n_frames_per_step")
         parser.link_arguments("model.n_frames_per_step", "model.decoder.init_args.n_frames_per_step")
-        parser.link_arguments("model.encoder.encoder_embedding_dim", "model.decoder.init_args.encoder_embedding_dim")
+
 
     def before_instantiate_classes(self) -> None:
         pass
