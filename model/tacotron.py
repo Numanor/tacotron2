@@ -8,8 +8,9 @@ from pytorch_lightning import LightningModule
 from .layers import AdversarialClassifier
 from utils.utils import get_mask_from_lengths
 from text import symbols
-
 from utils.plot import plot_alignment_to_numpy, plot_spectrogram_to_numpy, plot_gate_outputs_to_numpy
+
+from hifigan.vocoder import Vocoder 
 
 
 class Tacotron2(LightningModule):
@@ -20,7 +21,8 @@ class Tacotron2(LightningModule):
                  freeze_text: bool=False, load_pretrained_text: str=None,
                  multi_speaker: bool=False, spker_embedding_dim: int=64,
                  n_spker: int=1, speaker_loss_weight: float=0.02,
-                 speaker_classifier: AdversarialClassifier=None):
+                 speaker_classifier: AdversarialClassifier=None,
+                 vocoder: Vocoder=None):
 
         super(Tacotron2, self).__init__()
 
@@ -55,9 +57,15 @@ class Tacotron2(LightningModule):
             val = sqrt(3.0) * std  # uniform bounds for std
             self.speaker_embedding.weight.data.uniform_(-val, val)
             self.speaker_classifier = speaker_classifier
-            
+        
         self.decoder = decoder
         self.postnet = postnet
+
+        self.vocoder = vocoder
+        if self.vocoder != None:
+            for v in self.vocoder.generator.parameters():
+                v.requires_grad = False
+
 
     def parse_batch(self, batch):
         text_padded, input_lengths, mel_padded, gate_padded, output_lengths, spkerID = batch
@@ -106,7 +114,6 @@ class Tacotron2(LightningModule):
         loss['loss'] = sum(loss.values())
         return loss
 
-
     def forward(self, inputs: Dict):
         inputs["text_len"], inputs["mel_len"] = inputs["text_len"].data, inputs["mel_len"].data
 
@@ -143,6 +150,11 @@ class Tacotron2(LightningModule):
 
         return outputs
 
+
+    def mel2wav(self, mel) -> torch.Tensor:
+        audio = self.vocoder.mel2wav(mel.T)
+        return audio
+
     def log_loss(self, loss: Dict, prefix: str="training"):
         for k, v in loss.items():
             self.log(f"{prefix}.{k}", v)
@@ -155,19 +167,14 @@ class Tacotron2(LightningModule):
             tag = tag.replace('.', '/')
             self.logger.experiment.add_histogram(tag, value, iteration)
 
-        # plot alignment, mel target and predicted, gate target and predicted
+        # random select a sample for logging
         idx = random.randint(0, y_pred["align"].size(0) - 1)
+        mel_len = y["mel_len"][idx].data
+
+        # plot alignment, gate target and predicted
         self.logger.experiment.add_image(
             "alignment",
             plot_alignment_to_numpy(y_pred["align"][idx].data.cpu().numpy().T),
-            iteration, dataformats='HWC')
-        self.logger.experiment.add_image(
-            "mel_target",
-            plot_spectrogram_to_numpy(y["mel"][idx].data.cpu().numpy()),
-            iteration, dataformats='HWC')
-        self.logger.experiment.add_image(
-            "mel_predicted",
-            plot_spectrogram_to_numpy(y_pred["mel"][idx].data.cpu().numpy()),
             iteration, dataformats='HWC')
         self.logger.experiment.add_image(
             "gate",
@@ -175,6 +182,24 @@ class Tacotron2(LightningModule):
                 y["gate"][idx].data.cpu().numpy(),
                 torch.sigmoid(y_pred["gate"][idx]).data.cpu().numpy()),
             iteration, dataformats='HWC')
+
+        # plot mel target and predicted
+        mel_pred = y_pred["mel"][idx, :, :mel_len].data.cpu().numpy()
+        mel_target = y["mel"][idx, :, :mel_len].data.cpu().numpy()
+        self.logger.experiment.add_image(
+            "mel_target",
+            plot_spectrogram_to_numpy(mel_target),
+            iteration, dataformats='HWC')
+        self.logger.experiment.add_image(
+            "mel_predicted",
+            plot_spectrogram_to_numpy(mel_pred),
+            iteration, dataformats='HWC')
+
+        # synthesis audio from mel-spec
+        audio_pred = self.mel2wav(mel_pred)
+        audio_target = self.mel2wav(mel_target)
+        self.logger.experiment.add_audio("audio_pred", audio_pred, iteration, self.vocoder.config.sampling_rate, )
+        self.logger.experiment.add_audio("audio_target", audio_target, iteration, self.vocoder.config.sampling_rate)
 
     def training_step(self, batch: Dict, batch_idx):
         y_pred = self(batch)

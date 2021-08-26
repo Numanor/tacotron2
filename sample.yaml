@@ -46,6 +46,11 @@ model:
       postnet_embedding_dim: 512
       postnet_n_convolutions: 5
       postnet_kernel_size: 5
+  vocoder:
+    class_path: hifigan.vocoder.Vocoder
+    init_args:
+      checkpoint_file: /path/to/pretrained/hifigan/checkpoint
+      config_file: /path/to/pretrained/hifigan/config.json
 optimizer:
   lr: 0.001
   weight_decay: 0.000001
