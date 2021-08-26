@@ -2,6 +2,6 @@
 	path = waveglow
 	url = https://github.com/NVIDIA/waveglow
 	branch = master
-[submodule "hifi-gan"]
-	path = hifi-gan
-	url = git@github.com:thuhcsi/hifi-gan.git
+[submodule "hifigan"]
+	path = hifigan
+	url = git@github.com:thuhcsi/hifi-gan
