@@ -1,4 +1,4 @@
-from math import sqrt
+from math import sqrt, ceil
 import random
 from typing import Dict
 from numpy import mod
@@ -169,13 +169,17 @@ class Tacotron2(LightningModule):
 
         # random select a sample for logging
         idx = random.randint(0, y_pred["align"].size(0) - 1)
+        input_len = y["text_len"][idx].data
         mel_len = y["mel_len"][idx].data
 
-        # plot alignment, gate target and predicted
+        # plot decoder (and reference) attention alignment
+        decoder_steps = ceil(mel_len / self.hparams.n_frames_per_step)
         self.logger.experiment.add_image(
             "alignment",
-            plot_alignment_to_numpy(y_pred["align"][idx].data.cpu().numpy().T),
+            plot_alignment_to_numpy(y_pred["align"][idx, :decoder_steps, :input_len].data.cpu().numpy().T),
             iteration, dataformats='HWC')
+        
+        # plot gate target and predicted
         self.logger.experiment.add_image(
             "gate",
             plot_gate_outputs_to_numpy(
@@ -198,7 +202,7 @@ class Tacotron2(LightningModule):
         # synthesis audio from mel-spec
         audio_pred = self.mel2wav(mel_pred)
         audio_target = self.mel2wav(mel_target)
-        self.logger.experiment.add_audio("audio_pred", audio_pred, iteration, self.vocoder.config.sampling_rate, )
+        self.logger.experiment.add_audio("audio_pred", audio_pred, iteration, self.vocoder.config.sampling_rate)
         self.logger.experiment.add_audio("audio_target", audio_target, iteration, self.vocoder.config.sampling_rate)
 
     def training_step(self, batch: Dict, batch_idx):
