@@ -3,7 +3,7 @@ import torch
 
 def get_mask_from_lengths(lengths, total_length):
     # use total_length of a batch for data parallelism
-    ids = torch.arange(0, total_length, out=torch.cuda.LongTensor(total_length))
+    ids = torch.arange(0, total_length, device=lengths.device)
     mask = (ids < lengths.unsqueeze(1)).bool()
     return mask
 
